@@ -1,0 +1,10 @@
+{
+  "name": "fastium-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node -e \"console.log('fastium template dev')\"",
+    "build": "node -e \"console.log('fastium template build')\"",
+    "start": "node -e \"console.log('fastium template start')\""
+  }
+}

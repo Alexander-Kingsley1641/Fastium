@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.turbo
+.vitepress/dist
+.vitepress/cache
+*.log
+.env
+.env.*
+.DS_Store

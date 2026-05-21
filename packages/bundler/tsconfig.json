@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "dist"
+  },
+  "references": [
+    { "path": "../types" },
+    { "path": "../utils" },
+    { "path": "../plugins" },
+    { "path": "../compiler" }
+  ],
+  "include": ["src/**/*.ts"]
+}

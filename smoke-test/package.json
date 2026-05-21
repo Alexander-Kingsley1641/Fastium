@@ -1,0 +1,16 @@
+{
+  "name": "alexium-smoke-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node src/index.js"
+  },
+  "dependencies": {
+    "@alexium/backend": "file:../packages/backend",
+    "@alexium/core": "file:../packages/core",
+    "@alexium/frontend": "file:../packages/frontend",
+    "@alexium/logger": "file:../packages/logger",
+    "@alexium/plugins": "file:../packages/plugins",
+    "@alexium/utils": "file:../packages/utils"
+  }
+}

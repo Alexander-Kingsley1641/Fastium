@@ -1,0 +1,32 @@
+{
+  "name": "@alexium/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "bin": {
+    "alexium": "dist/src/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "dependencies": {
+    "@alexium/backend": "file:../backend",
+    "@alexium/core": "file:../core",
+    "@alexium/devtools": "file:../devtools",
+    "@alexium/frontend": "file:../frontend",
+    "@alexium/logger": "file:../logger",
+    "@alexium/plugins": "file:../plugins",
+    "@alexium/types": "file:../types",
+    "@alexium/utils": "file:../utils"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "dev": "tsc -b tsconfig.json --watch",
+    "test": "tsc -b tsconfig.json",
+    "lint": "tsc -b tsconfig.json"
+  }
+}

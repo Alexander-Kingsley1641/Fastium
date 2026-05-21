@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Alexium Playground</title>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div class="root">
+    <div class="navbar">
+      <div class="logo-section">
+        <div class="logo">◆ Alexium</div>
+        <div class="playground-title">Playground</div>
+        <div class="version-badge">v0.1.0</div>
+      </div>
+      <div style="flex:1"></div>
+      <div class="navbar-group">
+        <button class="navbar-btn" onclick="toggleViewport()">📱 Responsive</button>
+        <button class="navbar-btn" onclick="refreshPreview()">🔄 Refresh</button>
+        <button class="navbar-btn" onclick="shareProject()">📎 Share</button>
+        <button class="navbar-btn" onclick="openDocs()">📚 Docs</button>
+        <button class="navbar-btn" onclick="openSettings()">⚙️ Settings</button>
+        <button class="navbar-btn" onclick="validateWorkspace()">🧪 Validate</button>
+        <button class="navbar-btn run" onclick="runProject()">▶ Run</button>
+      </div>
+    </div>
+
+    <div class="main-container">
+      <div class="sidebar">
+        <div class="sidebar-header"><span class="sidebar-icon">📁</span><span>EXPLORER</span></div>
+        <div class="explorer">
+          <div class="folder-item open" onclick="toggleFolder(this)"><span class="folder-toggle">▶</span><span class="sidebar-icon">📂</span><span>src</span></div>
+          <div style="margin-left:16px;">
+            <div class="file-item active" onclick="switchFile(this,'main.ax')"><span class="file-icon">◆</span><span>main.ax</span></div>
+            <div class="file-item" onclick="switchFile(this,'app.ax')"><span class="file-icon">◆</span><span>app.ax</span></div>
+            <div class="file-item" onclick="switchFile(this,'style.ax')"><span class="file-icon">🎨</span><span>style.ax</span></div>
+          </div>
+
+          <div class="folder-item" onclick="toggleFolder(this)"><span class="folder-toggle">▶</span><span class="sidebar-icon">📂</span><span>public</span></div>
+          <div style="margin-left:16px;"><div class="file-item" onclick="switchFile(this,'public/index.html')"><span class="file-icon">🌐</span><span>index.html</span></div></div>
+
+          <div class="file-item" onclick="switchFile(this,'package.ax.json')"><span class="file-icon">📦</span><span>package.ax.json</span></div>
+          <div class="file-item" onclick="switchFile(this,'README.md')"><span class="file-icon">📄</span><span>README.md</span></div>
+        </div>
+      </div>
+
+      <div class="editor-section">
+        <div class="editor-tabs">
+          <button class="editor-tab active" onclick="switchTab(this,'main.ax')">◆ main.ax</button>
+          <button class="editor-tab" onclick="switchTab(this,'app.ax')">◆ app.ax</button>
+          <button class="editor-tab" onclick="switchTab(this,'style.ax')">🎨 style.ax</button>
+        </div>
+        <div class="editor-content">
+          <div class="line-numbers" id="lineNumbers"></div>
+          <textarea class="editor-textarea" id="editor" spellcheck="false"></textarea>
+        </div>
+        <div class="editor-statusbar">
+          <div class="status-group"><span id="cursorPos">Ln 1, Col 1</span><span>UTF-8</span><span>JavaScript</span></div>
+          <div class="status-group"><span id="fileInfo">main.ax</span></div>
+        </div>
+      </div>
+
+      <div class="preview-section">
+        <div class="preview-tabs">
+          <button class="preview-tab active" onclick="switchPreviewTab(this,'browser')">🌐 Browser</button>
+          <button class="preview-tab" onclick="switchPreviewTab(this,'elements')">🏷️ Elements</button>
+          <button class="preview-tab" onclick="switchPreviewTab(this,'styles')">🎨 Styles</button>
+        </div>
+        <div class="preview-content active" id="browser-preview">
+          <div class="browser-preview">
+            <div class="browser-chrome">
+              <button class="browser-button" onclick="navigateBack()">‹</button>
+              <button class="browser-button" onclick="navigateForward()">›</button>
+              <button class="browser-button" onclick="refreshPreview()">⟳</button>
+              <input type="text" class="browser-address" value="http://localhost:5500/" readonly>
+              <button class="browser-button" onclick="openExternal()">⤴</button>
+            </div>
+            <div class="preview-render">
+              <div class="preview-card">
+                <div class="preview-title">Hello Alexium 👋</div>
+                <div class="preview-subtitle">Modern IDE & Live Code Editor</div>
+                <div class="preview-buttons">
+                  <button class="preview-btn primary" onclick="incrementCounter()">Count: <span id="count">0</span></button>
+                  <button class="preview-btn" onclick="resetCounter()">Reset</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="preview-content" id="elements-preview"></div>
+        <div class="preview-content" id="styles-preview"></div>
+      </div>
+    </div>
+
+    <div class="bottom-panel">
+      <div class="bottom-panel-resizer" id="resizeHandle"></div>
+      <div class="panel-shell" style="width:100%;display:flex;gap:0;">
+        <div class="console-section">
+          <div class="console-tabs">
+            <button class="console-tab active" onclick="switchConsoleTab(this,'console')">CONSOLE</button>
+            <button class="console-tab" onclick="switchConsoleTab(this,'problems')">PROBLEMS</button>
+            <button class="console-tab" onclick="switchConsoleTab(this,'logs')">LOGS</button>
+            <button class="console-tab" onclick="switchConsoleTab(this,'terminal')">TERMINAL</button>
+            <button class="console-tab" onclick="switchConsoleTab(this,'tests')">TEST RUNNER</button>
+          </div>
+          <div class="console-output" id="console-output"></div>
+        </div>
+
+        <div class="diagnostics-panel">
+          <div class="diagnostics-tabs">
+            <button class="diagnostics-tab active" onclick="switchDiagnosticsTab(this,'runtime')">Runtime</button>
+            <button class="diagnostics-tab" onclick="switchDiagnosticsTab(this,'hmr')">HMR</button>
+            <button class="diagnostics-tab" onclick="switchDiagnosticsTab(this,'memory')">Memory</button>
+            <button class="diagnostics-tab" onclick="switchDiagnosticsTab(this,'graph')">Module Graph</button>
+            <button class="diagnostics-tab" onclick="switchDiagnosticsTab(this,'tests')">Tests</button>
+          </div>
+          <div class="diagnostics-content active" id="diagnostics-runtime"></div>
+          <div class="diagnostics-content" id="diagnostics-hmr"></div>
+          <div class="diagnostics-content" id="diagnostics-memory"></div>
+          <div class="diagnostics-content" id="diagnostics-graph"></div>
+          <div class="diagnostics-content" id="diagnostics-tests"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div class="footer-item"><span class="footer-indicator"></span><span>Ready</span></div>
+      <div class="footer-item"><span class="footer-indicator" style="background:var(--primary-blue)"></span><span>HMR Connected</span></div>
+      <div class="footer-item"><span style="color:var(--primary-blue)">◆</span><span>Alexium</span></div>
+    </div>
+
+    <iframe class="sandbox-frame" id="sandbox-frame" sandbox="allow-scripts"></iframe>
+
+    <div class="overlay" id="errorOverlay" aria-hidden="true">
+      <div class="overlay-card">
+        <div class="overlay-header">
+          <div>
+            <div class="overlay-title">Runtime fault isolated</div>
+            <div id="overlaySummary" style="color:#cbd5e1;margin-top:6px;font-size:13px;">The sandbox recovered from a module or runtime failure.</div>
+          </div>
+          <button class="overlay-btn" onclick="hideOverlay()">Dismiss</button>
+        </div>
+        <div class="overlay-body">
+          <div class="overlay-code" id="overlayCodeFrame"></div>
+          <div>
+            <div class="metric-card"><div class="metric-label">Diagnostics</div><div class="metric-value" id="overlayDiagnostics"></div></div>
+            <div class="metric-card"><div class="metric-label">Recovery</div><div class="metric-value" id="overlayRecovery"></div></div>
+          </div>
+        </div>
+        <div class="overlay-actions">
+          <button class="overlay-btn" onclick="runValidationSuite()">Run Tests</button>
+          <button class="overlay-btn" onclick="restartSandbox()">Restart Sandbox</button>
+          <button class="overlay-btn primary" onclick="recoverFromOverlay()">Restore Safe Snapshot</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="index.js" defer></script>
+</body>
+</html>

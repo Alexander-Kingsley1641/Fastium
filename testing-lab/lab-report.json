@@ -1,0 +1,122 @@
+{
+  "rootDir": "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab",
+  "generatedAt": "2026-05-21T08:07:30.348Z",
+  "total": 5,
+  "passed": 5,
+  "failed": 0,
+  "durationMs": 147.0169,
+  "suites": [
+    {
+      "name": "frontend-test",
+      "projectDir": "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-test",
+      "status": "passed",
+      "durationMs": 38.61770000000001,
+      "metrics": {
+        "compileMs": 6.997099999999989,
+        "buildMs": 8.342900000000014,
+        "hmrMs": 4,
+        "memoryBeforeMb": 8.7,
+        "memoryAfterMb": 8.58,
+        "bundleSize": 2,
+        "routeCount": 2
+      },
+      "diagnostics": [
+        "compiled main.fst -> 3ac5b0aafade2f857f226993bbca5984b2474c87e1958829e8aeafbc079c511a",
+        "hmr packets 4",
+        "bundle modules 2"
+      ],
+      "files": [
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-test\\fast.config.js",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-test\\package.json",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-test\\src\\lazy.ts",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-test\\src\\main.fst"
+      ]
+    },
+    {
+      "name": "backend-test",
+      "projectDir": "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\backend-test",
+      "status": "passed",
+      "durationMs": 56.93729999999999,
+      "metrics": {
+        "startupMs": 40.8879,
+        "responseMs": 0,
+        "memoryBeforeMb": 8.79,
+        "memoryAfterMb": 9.1,
+        "routeCount": 3
+      },
+      "diagnostics": [
+        "server http://127.0.0.1:62613",
+        "websocket upgrade accepted"
+      ],
+      "files": [
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\backend-test\\fast.config.js",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\backend-test\\package.json",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\backend-test\\src\\server.ts"
+      ]
+    },
+    {
+      "name": "discord-test",
+      "projectDir": "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\discord-test",
+      "status": "passed",
+      "durationMs": 14.04079999999999,
+      "metrics": {
+        "startupMs": 0.25909999999998945,
+        "memoryBeforeMb": 9.28,
+        "memoryAfterMb": 9.32,
+        "routeCount": 2
+      },
+      "diagnostics": [
+        "modal modal-a557a54dff21e72a",
+        "button button-1f17028f9262446f"
+      ],
+      "files": [
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\discord-test\\fast.config.js",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\discord-test\\package.json",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\discord-test\\src\\bot.ts"
+      ]
+    },
+    {
+      "name": "websocket-test",
+      "projectDir": "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\websocket-test",
+      "status": "passed",
+      "durationMs": 12.538700000000006,
+      "metrics": {
+        "websocketMs": 6,
+        "memoryBeforeMb": 9.47,
+        "memoryAfterMb": 9.49,
+        "routeCount": 6
+      },
+      "diagnostics": [
+        "handshake key p+grmOBYdIMw…",
+        "frames 6"
+      ],
+      "files": [
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\websocket-test\\fast.config.js",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\websocket-test\\package.json",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\websocket-test\\src\\socket.ts"
+      ]
+    },
+    {
+      "name": "frontend-build-test",
+      "projectDir": "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-build-test",
+      "status": "passed",
+      "durationMs": 13.371500000000026,
+      "metrics": {
+        "buildMs": 3.4513000000000034,
+        "memoryBeforeMb": 9.68,
+        "memoryAfterMb": 9.87,
+        "bundleSize": 2
+      },
+      "diagnostics": [
+        "compiled 3ac5b0aafade2f857f226993bbca5984b2474c87e1958829e8aeafbc079c511a",
+        "bundle externals 1"
+      ],
+      "files": [
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-build-test\\fast.config.js",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-build-test\\package.json",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-build-test\\src\\lazy.ts",
+        "D:\\project\\The Big Project (OS Dev)\\Alexium\\testing-lab\\frontend-build-test\\src\\main.fst"
+      ]
+    }
+  ]
+}

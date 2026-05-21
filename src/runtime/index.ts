@@ -1,0 +1,182 @@
+import process from 'node:process';
+
+import { deepMerge, createEventBus } from '../utils/index.js';
+import { createLogger, type Logger } from '../logger/index.js';
+import { createCompiler } from '../compiler/index.js';
+import { createBundler } from '../bundler/index.js';
+import { createBackendRuntime } from '../backend/index.js';
+import { createBrowserBridge } from '../browser/index.js';
+import { createHmrRuntime } from '../hmr/index.js';
+import { createPluginManager, type FastiumPlugin } from '../plugins/index.js';
+import { createWatcher } from '../watcher/index.js';
+import { createTestRuntime } from '../testing/index.js';
+import { createSandbox } from '../sandbox/index.js';
+import { createPlayground } from '../playground/index.js';
+import { Client as DiscordClient } from '../discord/index.js';
+import { createCache } from '../cache/index.js';
+import { createRouter } from '../router/index.js';
+import { createSignal, createStore } from '../state/index.js';
+
+export interface FastiumConfig {
+  framework?: 'fastium' | 'react' | 'vue';
+  rootDir?: string;
+  entry?: string;
+  mode?: 'development' | 'production' | 'test';
+  plugins?: FastiumPlugin[];
+  server?: { host?: string; port?: number; publicDir?: string; https?: { key: string; cert: string } };
+  hmr?: { enabled?: boolean; overlay?: boolean; path?: string } | boolean;
+  runtime?: { lowMemoryMode?: boolean; executionTimeoutMs?: number };
+  discord?: { intents?: string[] };
+}
+
+export interface FastiumRuntime {
+  config: Required<Pick<FastiumConfig, 'framework' | 'mode'>> & FastiumConfig;
+  logger: Logger;
+  compiler: ReturnType<typeof createCompiler>;
+  bundler: ReturnType<typeof createBundler>;
+  backend: ReturnType<typeof createBackendRuntime>;
+  browser: ReturnType<typeof createBrowserBridge>;
+  hmr: ReturnType<typeof createHmrRuntime>;
+  plugins: ReturnType<typeof createPluginManager>;
+  watcher: ReturnType<typeof createWatcher>;
+  testing: ReturnType<typeof createTestRuntime>;
+  sandbox: ReturnType<typeof createSandbox>;
+  playground: ReturnType<typeof createPlayground>;
+  discord: DiscordClient;
+  state: { createSignal: typeof createSignal; createStore: typeof createStore; createRouter: typeof createRouter };
+  cache: ReturnType<typeof createCache>;
+  events: ReturnType<typeof createEventBus>;
+  bootstrap: () => Promise<FastiumRuntime>;
+  dev: () => Promise<{ server: Awaited<ReturnType<ReturnType<typeof createBackendRuntime>['start']>>; browser?: unknown }>;
+  build: (entry?: string) => Promise<unknown>;
+  start: () => Promise<unknown>;
+  test: () => Promise<unknown>;
+  doctor: () => Promise<Record<string, unknown>>;
+  analyze: (entry?: string) => Promise<Record<string, unknown>>;
+  dispose: () => Promise<void>;
+}
+
+const createDefaultConfig = (): FastiumConfig => ({
+  framework: 'fastium',
+  mode: 'development',
+  rootDir: process.cwd(),
+  entry: 'examples/main.fst',
+  server: {
+    host: '127.0.0.1',
+    port: 3000,
+    publicDir: undefined
+  },
+  hmr: {
+    enabled: true,
+    overlay: true,
+    path: '/fastium-hmr'
+  },
+  runtime: {
+    lowMemoryMode: true,
+    executionTimeoutMs: 1000
+  },
+  discord: {
+    intents: []
+  }
+});
+
+export const createFastium = (config: FastiumConfig = {}): FastiumRuntime => {
+  const resolvedConfig = deepMerge(createDefaultConfig(), config);
+  const logger = createLogger({ scope: 'fastium', debug: resolvedConfig.mode !== 'production' });
+  const events = createEventBus();
+  const plugins = createPluginManager(resolvedConfig.plugins ?? []);
+  const hmr = createHmrRuntime({ logger: logger.child('hmr') });
+  const compiler = createCompiler({ logger: logger.child('compiler') });
+  const bundler = createBundler({ rootDir: resolvedConfig.rootDir ?? process.cwd(), logger: logger.child('bundler'), compiler });
+  const backend = createBackendRuntime({
+    host: resolvedConfig.server?.host,
+    port: resolvedConfig.server?.port,
+    publicDir: resolvedConfig.server?.publicDir,
+    https: resolvedConfig.server?.https,
+    logger: logger.child('server'),
+    hmr: resolvedConfig.hmr
+  });
+  const browser = createBrowserBridge({ logger: logger.child('browser') });
+  const watcher = createWatcher(resolvedConfig.rootDir ?? process.cwd(), async changes => {
+    for (const change of changes) {
+      await plugins.hotUpdate({ filePath: change.path, changed: change.event !== 'unlink' });
+      hmr.invalidate(change.path, change);
+    }
+  });
+  const testing = createTestRuntime({ logger: logger.child('test') });
+  const sandbox = createSandbox({ timeoutMs: resolvedConfig.runtime?.executionTimeoutMs ?? 1000 });
+  const playground = createPlayground();
+  const discord = new DiscordClient({ intents: resolvedConfig.discord?.intents ?? [] });
+  const cache = createCache<string, unknown>({ maxEntries: 256 });
+  const state = { createSignal, createStore, createRouter };
+
+  const runtime: FastiumRuntime = {
+    config: resolvedConfig as Required<Pick<FastiumConfig, 'framework' | 'mode'>> & FastiumConfig,
+    logger,
+    compiler,
+    bundler,
+    backend,
+    browser,
+    hmr,
+    plugins,
+    watcher,
+    testing,
+    sandbox,
+    playground,
+    discord,
+    state,
+    cache,
+    events,
+    bootstrap: async () => {
+      await plugins.setup({ logger, runtime, compiler, server: backend, hmr });
+      return runtime;
+    },
+    dev: async () => {
+      await runtime.bootstrap();
+      await watcher.start();
+      const serverHandle = await backend.start();
+      const overlayEnabled = typeof resolvedConfig.hmr === 'object' ? resolvedConfig.hmr.overlay ?? true : true;
+      const browserSession = await browser.open(serverHandle.url, overlayEnabled, true);
+      return { server: serverHandle, browser: browserSession };
+    },
+    build: async (entry = resolvedConfig.entry ?? 'examples/main.fst') => {
+      await runtime.bootstrap();
+      return bundler.bundle(entry);
+    },
+    start: async () => {
+      await runtime.bootstrap();
+      return backend.start();
+    },
+    test: async () => testing.run(),
+    doctor: async () => ({
+      name: 'fastium',
+      framework: resolvedConfig.framework,
+      mode: resolvedConfig.mode,
+      rootDir: resolvedConfig.rootDir,
+      node: process.version,
+      lowMemoryMode: resolvedConfig.runtime?.lowMemoryMode ?? false
+    }),
+    analyze: async (entry = resolvedConfig.entry ?? 'examples/main.fst') => {
+      const bundle = await bundler.bundle(entry);
+      return {
+        entry: bundle.entry,
+        modules: bundle.modules.length,
+        externals: bundle.externals.length,
+        hash: bundle.modules.at(0)?.compilation.hash
+      };
+    },
+    dispose: async () => {
+      await plugins.dispose();
+      watcher.close();
+      await backend.stop();
+      hmr.clearState();
+      cache.clear();
+    }
+  };
+
+  return runtime;
+};
+
+export const createAlexium = createFastium;
+export const createRuntime = createFastium;
+export { createDiagnosticReport, renderErrorOverlay } from '../diagnostics/index.js';

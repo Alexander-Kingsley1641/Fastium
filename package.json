@@ -1,0 +1,47 @@
+{
+  "name": "fastium",
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "npm@10.5.0",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "bin": {
+    "fast": "./bin/fast.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    },
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./dist/src/*/index.d.ts",
+      "import": "./dist/src/*/index.js"
+    }
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src",
+    "README.md",
+    "docs",
+    "examples",
+    "templates",
+    "benchmarks",
+    "fast.config.js"
+  ],
+  "scripts": {
+    "dev": "tsc -b tsconfig.json --watch",
+    "build": "tsc -b tsconfig.json",
+    "test": "tsc -b tsconfig.json && node smoke-test/src/index.js && node scripts/check-workspace.ts",
+    "lint": "tsc -b tsconfig.json",
+    "docs:dev": "node scripts/serve-docs.ts",
+    "docs:build": "node scripts/build-docs.ts",
+    "cli": "node dist/src/cli/index.js",
+    "doctor": "node dist/src/cli/index.js doctor"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "typescript": "^5.7.3"
+  }
+}
