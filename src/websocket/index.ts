@@ -6,6 +6,7 @@ export interface WebSocketFrame {
   opcode: number;
   masked: boolean;
   payload: Uint8Array;
+  byteLength?: number;
 }
 
 export interface WebSocketChannel {
@@ -19,7 +20,7 @@ const MAGIC = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 export const createWebSocketAcceptKey = (key: string): string => createHash('sha1').update(`${key}${MAGIC}`).digest('base64');
 
-export const encodeWebSocketFrame = (payload: string | Uint8Array, opcode = 1): Buffer => {
+export const encodeWebSocketFrame = (payload: string | Uint8Array, opcode = typeof payload === 'string' ? 1 : 2): Buffer => {
   const bytes = typeof payload === 'string' ? Buffer.from(payload) : Buffer.from(payload);
   const length = bytes.length;
   const header = length < 126 ? Buffer.alloc(2) : length < 65536 ? Buffer.alloc(4) : Buffer.alloc(10);
@@ -52,17 +53,30 @@ export const decodeWebSocketFrame = (buffer: Buffer): WebSocketFrame | undefined
   let payloadLength = secondByte & 0x7f;
 
   if (payloadLength === 126) {
+    if (buffer.length < offset + 2) {
+      return undefined;
+    }
     payloadLength = buffer.readUInt16BE(offset);
     offset += 2;
   } else if (payloadLength === 127) {
+    if (buffer.length < offset + 8) {
+      return undefined;
+    }
     payloadLength = Number(buffer.readBigUInt64BE(offset));
     offset += 8;
   }
 
   let mask: Buffer | undefined;
   if (masked) {
+    if (buffer.length < offset + 4) {
+      return undefined;
+    }
     mask = buffer.subarray(offset, offset + 4);
     offset += 4;
+  }
+
+  if (buffer.length < offset + payloadLength) {
+    return undefined;
   }
 
   const payload = buffer.subarray(offset, offset + payloadLength);
@@ -76,9 +90,42 @@ export const decodeWebSocketFrame = (buffer: Buffer): WebSocketFrame | undefined
     fin,
     opcode,
     masked,
-    payload: new Uint8Array(payload)
+    payload: new Uint8Array(payload),
+    byteLength: offset + payloadLength
   };
 };
+
+export const decodeWebSocketFrames = (buffer: Buffer): { frames: WebSocketFrame[]; remaining: Buffer } => {
+  const frames: WebSocketFrame[] = [];
+  let offset = 0;
+
+  while (offset < buffer.length) {
+    const frame = decodeWebSocketFrame(buffer.subarray(offset));
+    if (!frame?.byteLength) {
+      break;
+    }
+
+    frames.push(frame);
+    offset += frame.byteLength;
+  }
+
+  return { frames, remaining: buffer.subarray(offset) };
+};
+
+export class WebSocketFrameDecoder {
+  private buffer = Buffer.alloc(0);
+
+  push(chunk: Buffer | Uint8Array): WebSocketFrame[] {
+    this.buffer = this.buffer.length === 0 ? Buffer.from(chunk) : Buffer.concat([this.buffer, Buffer.from(chunk)]);
+    const result = decodeWebSocketFrames(this.buffer);
+    this.buffer = Buffer.from(result.remaining);
+    return result.frames;
+  }
+
+  reset(): void {
+    this.buffer = Buffer.alloc(0);
+  }
+}
 
 export const createWebSocketEngine = () => {
   const sockets = new Set<Socket>();
@@ -100,10 +147,21 @@ export const createWebSocketEngine = () => {
   const add = (socket: Socket) => {
     sockets.add(socket);
     lastSeen.set(socket, Date.now());
-    socket.on('data', () => lastSeen.set(socket, Date.now()));
+    const decoder = new WebSocketFrameDecoder();
+    socket.on('data', chunk => {
+      lastSeen.set(socket, Date.now());
+      for (const frame of decoder.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))) {
+        if (frame.opcode === 0x08) {
+          socket.end();
+        } else if (frame.opcode === 0x09) {
+          socket.write(encodeWebSocketFrame(frame.payload, 0x0a));
+        }
+      }
+    });
     socket.once('close', () => {
       sockets.delete(socket);
       lastSeen.delete(socket);
+      decoder.reset();
     });
   };
 

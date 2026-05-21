@@ -11,6 +11,7 @@ export * from './frontend/index.js';
 export * from './hmr/index.js';
 export * from './lexer/index.js';
 export * from './logger/index.js';
+export * from './native/index.js';
 export * from './parser/index.js';
 export * from './playground/index.js';
 export * from './plugins/index.js';

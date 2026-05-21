@@ -1,4 +1,4 @@
-import { createFastium, createServer, createApp, defineComponent, createLogger, definePlugin, deepMerge, createEventBus, randomID } from 'fastium';
+import { createFastium, createServer, createApp, defineComponent, createLogger, definePlugin, deepMerge, createEventBus, randomID } from '../../dist/src/index.js';
 
 const logger = createLogger({ scope: 'smoke-test', debug: true });
 const bus = createEventBus();
@@ -37,3 +37,5 @@ console.log(JSON.stringify({
   merged,
   component: component.name
 }, null, 2));
+
+await framework.dispose();

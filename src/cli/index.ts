@@ -10,11 +10,13 @@ import { createFastium } from '../runtime/index.js';
 import { createLogger } from '../logger/index.js';
 import { createCompiler } from '../compiler/index.js';
 import { benchmark } from '../testing/index.js';
+import { runNativeBenchmarkSuite } from '../native/benchmark/index.js';
 
 interface ParsedArguments {
   command: string;
   positionals: string[];
   flags: Set<string>;
+  values: Map<string, string>;
 }
 
 const LAB_TEST_SUITES = new Set(['frontend', 'backend', 'discord', 'websocket', 'build', 'all']);
@@ -24,9 +26,21 @@ const logger = createLogger({ scope: 'fastium:cli', debug: process.argv.includes
 const parseArguments = (argv: string[]): ParsedArguments => {
   const positionals: string[] = [];
   const flags = new Set<string>();
+  const values = new Map<string, string>();
 
-  for (const argument of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index] ?? '';
     if (argument.startsWith('--')) {
+      const [name, inlineValue] = argument.split('=', 2);
+      if (inlineValue !== undefined) {
+        values.set(name, inlineValue);
+      } else if (argv[index + 1] && !argv[index + 1].startsWith('-')) {
+        values.set(name, argv[index + 1]);
+        index += 1;
+      } else {
+        flags.add(name);
+      }
+    } else if (argument.startsWith('-') && argument.length > 1) {
       flags.add(argument);
     } else {
       positionals.push(argument);
@@ -36,9 +50,29 @@ const parseArguments = (argv: string[]): ParsedArguments => {
   return {
     command: positionals[0] ?? 'dev',
     positionals: positionals.slice(1),
-    flags
+    flags,
+    values
   };
 };
+
+const renderHelp = (): string => `Fastium
+
+Usage:
+  fast
+  fast build
+  fast start
+  fast test [frontend|backend|discord|websocket|build]
+  fast doctor
+  fast analyze
+  fast create [name] [destination] [template]
+
+Flags:
+  --debug        Enable debug logs
+  --benchmark    Run the internal compiler benchmark for fast test
+  --watch        Keep test mode active
+  --keep         Keep generated testing-lab project files
+  --help         Show this help
+  --version      Show package version`;
 
 const prompt = async (question: string, fallback = ''): Promise<string> => {
   const interfaceInstance = createInterface({ input: stdin, output: stdout });
@@ -123,17 +157,25 @@ const runStart = async (rootDir: string): Promise<void> => {
 const runBuild = async (rootDir: string): Promise<void> => {
   const config = await loadConfig(rootDir);
   const runtime = createFastium({ ...(config as Record<string, unknown>), rootDir, mode: 'production' });
-  const bundle = await runtime.build((config.entry as string | undefined) ?? 'examples/main.fst');
-  await mkdir(path.join(rootDir, 'dist'), { recursive: true });
-  await writeFile(path.join(rootDir, 'dist', 'fastium-build.json'), JSON.stringify(bundle, null, 2), 'utf8');
-  logger.success('Fastium build artifacts written to dist/');
+  try {
+    const bundle = await runtime.build((config.entry as string | undefined) ?? 'examples/main.fst');
+    await mkdir(path.join(rootDir, 'dist'), { recursive: true });
+    await writeFile(path.join(rootDir, 'dist', 'fastium-build.json'), JSON.stringify(bundle, null, 2), 'utf8');
+    logger.success('Fastium build artifacts written to dist/');
+  } finally {
+    await runtime.dispose();
+  }
 };
 
 const runAnalyze = async (rootDir: string): Promise<void> => {
   const config = await loadConfig(rootDir);
   const runtime = createFastium({ ...(config as Record<string, unknown>), rootDir, mode: 'production' });
-  const report = await runtime.analyze((config.entry as string | undefined) ?? 'examples/main.fst');
-  logger.info(JSON.stringify(report, null, 2));
+  try {
+    const report = await runtime.analyze((config.entry as string | undefined) ?? 'examples/main.fst');
+    logger.info(JSON.stringify(report, null, 2));
+  } finally {
+    await runtime.dispose();
+  }
 };
 
 const runTest = async (rootDir: string, flags: Set<string>): Promise<void> => {
@@ -147,6 +189,15 @@ const runTest = async (rootDir: string, flags: Set<string>): Promise<void> => {
       await compiler.compileSource(sample);
     }, 250);
     logger.info(`benchmark ${result.name}: ${(result.durationMs / result.iterations).toFixed(4)}ms avg over ${result.iterations} runs`);
+    const nativeReport = await runNativeBenchmarkSuite(sample);
+    logger.info(JSON.stringify({
+      native: nativeReport.results.map(item => ({
+        name: item.name,
+        durationMs: item.durationMs,
+        status: item.status,
+        retainedHeap: item.retainedHeap
+      }))
+    }, null, 2));
     return;
   }
 
@@ -178,6 +229,17 @@ export const runCli = async (): Promise<void> => {
   const rootDir = process.cwd();
   const { command, positionals, flags } = parseArguments(process.argv.slice(2));
 
+  if (flags.has('--help') || flags.has('-h') || command === 'help') {
+    logger.info(renderHelp());
+    return;
+  }
+
+  if (flags.has('--version') || flags.has('-v') || command === 'version') {
+    const packageJson = await import(pathToFileURL(path.join(rootDir, 'package.json')).href).catch(() => ({ default: { version: 'unknown' } }));
+    logger.info(String((packageJson as { default?: { version?: string }; version?: string }).default?.version ?? (packageJson as { version?: string }).version ?? 'unknown'));
+    return;
+  }
+
   if (command === 'create') {
     await runCreate(rootDir, positionals);
     return;
@@ -188,7 +250,7 @@ export const runCli = async (): Promise<void> => {
     return;
   }
 
-  if (command === 'dev') {
+  if (command === 'dev' || command === 'serve') {
     await runDev(rootDir);
     return;
   }
@@ -224,7 +286,7 @@ export const runCli = async (): Promise<void> => {
     return;
   }
 
-  logger.info('Commands: fast dev | build | start | test [frontend|backend|discord|websocket|build] | test-lab | doctor | analyze | create');
+  logger.info(renderHelp());
 };
 
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) {

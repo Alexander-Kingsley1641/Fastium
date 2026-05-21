@@ -1,6 +1,6 @@
 {
   "name": "fastium",
-  "version": "0.1.0-alpha.0",
+  "version": "0.0.1-pre-alpha",
   "description": "Fastium is an experimental JavaScript/TypeScript runtime, compiler, bundler, and HMR platform.",
   "type": "module",
   "packageManager": "npm@10.5.0",

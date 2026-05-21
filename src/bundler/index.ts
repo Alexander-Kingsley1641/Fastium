@@ -1,10 +1,11 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-import { createCache, type MemoryCache } from '../cache/index.js';
+import { createCache, isTransformCacheRecordFresh, readFileMetadata, type FileCacheMetadata, type MemoryCache, type TransformCacheRecord } from '../cache/index.js';
 import { createCompiler, type CompilationResult } from '../compiler/index.js';
 import { createLogger, type Logger } from '../logger/index.js';
 import { createGraph } from '../graph/index.js';
+import { scanImportSpecifiersNative } from '../native/parser/index.js';
 
 export interface BundleModule {
   id: string;
@@ -24,11 +25,9 @@ export interface BundlerOptions {
   rootDir?: string;
   logger?: Logger;
   compiler?: ReturnType<typeof createCompiler>;
-  cache?: MemoryCache<string, CompilationResult>;
+  cache?: MemoryCache<string, TransformCacheRecord<CompilationResult>>;
 }
 
-const IMPORT_PATTERN = /(?:import|export)\s+(?:[^'"`]*?\s+from\s+)?['"`]([^'"`]+)['"`]/g;
-const DYNAMIC_IMPORT_PATTERN = /import\(\s*['"`]([^'"`]+)['"`]\s*\)/g;
 const EXTENSIONS = ['.fst', '.ts', '.tsx', '.mts', '.js', '.mjs', '.cjs', '.jsx'];
 
 const isRelativeSpecifier = (specifier: string): boolean => specifier.startsWith('.') || specifier.startsWith('/');
@@ -62,39 +61,61 @@ const resolveCandidate = async (basePath: string): Promise<string | undefined> =
 };
 
 const extractDependencies = (source: string): string[] => {
-  const dependencies = new Set<string>();
-  for (const match of source.matchAll(IMPORT_PATTERN)) {
-    const specifier = match[1];
-    if (specifier) {
-      dependencies.add(specifier);
-    }
-  }
-
-  for (const match of source.matchAll(DYNAMIC_IMPORT_PATTERN)) {
-    const specifier = match[1];
-    if (specifier) {
-      dependencies.add(specifier);
-    }
-  }
-
-  return Array.from(dependencies);
+  return scanImportSpecifiersNative(source);
 };
 
 export const createBundler = (options: BundlerOptions = {}) => {
   const rootDir = options.rootDir ?? process.cwd();
   const logger = options.logger ?? createLogger({ scope: 'fastium:bundler', debug: false });
   const compiler = options.compiler ?? createCompiler({ logger: logger.child('compiler') });
-  const cache = options.cache ?? createCache<string, CompilationResult>({ maxEntries: 256 });
+  const cache = options.cache ?? createCache<string, TransformCacheRecord<CompilationResult>>({ maxEntries: 256 });
   const moduleGraph = createGraph();
+
+  const compileWithCache = async (absolutePath: string): Promise<CompilationResult> => {
+    const cached = cache.get(absolutePath);
+    if (await isTransformCacheRecordFresh(cached)) {
+      return cached?.value as CompilationResult;
+    }
+
+    const source = await readFile(absolutePath, 'utf8');
+    const compilation = await compiler.compileSource(source, { filePath: absolutePath });
+    const metadata = await readFileMetadata(absolutePath, compilation.hash);
+    const dependencies = extractDependencies(compilation.code);
+    const dependencyMetadata: Record<string, FileCacheMetadata> = {};
+
+    for (const dependency of dependencies) {
+      if (!isRelativeSpecifier(dependency)) {
+        continue;
+      }
+
+      const resolved = await resolveCandidate(path.resolve(path.dirname(absolutePath), dependency)) ?? await resolveCandidate(path.join(path.resolve(path.dirname(absolutePath), dependency), 'index'));
+      if (resolved) {
+        const metadataForDependency = await readFileMetadata(resolved);
+        if (metadataForDependency) {
+          dependencyMetadata[resolved] = metadataForDependency;
+        }
+      }
+    }
+
+    if (metadata) {
+      cache.set(absolutePath, {
+        value: compilation,
+        metadata,
+        dependencies: dependencyMetadata
+      });
+    }
+
+    return compilation;
+  };
 
   const graph = async (entryFilePath: string, visited = new Map<string, BundleModule>(), externals = new Set<string>()): Promise<{ visited: Map<string, BundleModule>; externals: Set<string> }> => {
     const absoluteEntry = path.isAbsolute(entryFilePath) ? entryFilePath : path.resolve(rootDir, entryFilePath);
     if (visited.has(absoluteEntry)) {
       return { visited, externals };
     }
-    const compilation = cache.get(absoluteEntry) ?? await compiler.compileFile(absoluteEntry);
-    cache.set(absoluteEntry, compilation);
+    const compilation = await compileWithCache(absoluteEntry);
     const dependencies = extractDependencies(compilation.code);
+    const resolvedDependencies: string[] = [];
     visited.set(absoluteEntry, {
       id: path.relative(rootDir, absoluteEntry) || path.basename(absoluteEntry),
       filePath: absoluteEntry,
@@ -120,13 +141,24 @@ export const createBundler = (options: BundlerOptions = {}) => {
         continue;
       }
 
-      // link in module graph
-      try {
-        moduleGraph.linkModule(absoluteEntry, resolved);
-      } catch {}
+      resolvedDependencies.push(resolved);
 
       await graph(resolved, visited, externals);
     }
+
+    try {
+      moduleGraph.setDependencies(absoluteEntry, resolvedDependencies);
+      moduleGraph.updateModule(absoluteEntry, {
+        hash: compilation.hash,
+        lastUpdate: Date.now(),
+        transformResult: compilation,
+        cache: cache.get(absoluteEntry),
+        hmrBoundaries: {
+          accepts: compilation.code.includes('__FASTIUM_HMR__') || compilation.code.includes('import.meta.hot'),
+          framework: compilation.framework
+        }
+      });
+    } catch {}
 
     return { visited, externals };
   };
@@ -147,6 +179,36 @@ export const createBundler = (options: BundlerOptions = {}) => {
     };
   };
 
+  const rebuildOne = async (absolute: string) => {
+    const prev = cache.get(absolute)?.value;
+    cache.delete(absolute);
+    const compilation = await compileWithCache(absolute);
+    try {
+      moduleGraph.updateModule(absolute, {
+        hash: compilation.hash,
+        lastUpdate: Date.now(),
+        transformResult: compilation,
+        cache: cache.get(absolute)
+      });
+    } catch {}
+
+    const moduleId = (path.relative(rootDir, absolute) || path.basename(absolute)).replace(/\\/g, '/');
+    const packet = {
+      type: 'update',
+      moduleId,
+      payload: {
+        code: compilation.code,
+        hash: compilation.hash,
+        prevHash: prev?.hash,
+        filePath: absolute
+      },
+      timestamp: Date.now()
+    } as const;
+
+    logger.debug('rebuildModule', moduleId, prev?.hash ? `${prev.hash.slice(0, 8)}->${compilation.hash.slice(0, 8)}` : compilation.hash.slice(0, 8));
+    return packet;
+  };
+
   return {
     bundle,
     graph,
@@ -160,42 +222,54 @@ export const createBundler = (options: BundlerOptions = {}) => {
     }
     ,
     invalidate: (filePath: string) => {
-      try {
-        moduleGraph.invalidate(filePath);
-      } catch {}
+      const affected = (() => {
+        try {
+          return moduleGraph.invalidate(filePath);
+        } catch {
+          return [];
+        }
+      })();
       try {
         const abs = path.isAbsolute(filePath) ? filePath : path.resolve(rootDir, filePath);
-        if (typeof (cache as any).invalidate === 'function') {
-          (cache as any).invalidate(abs);
-        } else {
-          cache.delete(abs);
+        const targets = affected.length > 0 ? affected : [abs];
+        for (const target of targets) {
+          if (typeof (cache as any).invalidate === 'function') {
+            (cache as any).invalidate(target);
+          } else {
+            cache.delete(target);
+          }
         }
       } catch {}
+      return affected;
     }
     ,
     rebuildModule: async (filePath: string) => {
       const absolute = path.isAbsolute(filePath) ? filePath : path.resolve(rootDir, filePath);
-      // compile fresh
-      const compilation = await compiler.compileFile(absolute);
-      const prev = cache.get(absolute) as CompilationResult | undefined;
-      cache.set(absolute, compilation);
-      try { moduleGraph.addModule(absolute); } catch {}
+      return [await rebuildOne(absolute)];
+    },
+    rebuildAffected: async (filePath: string) => {
+      const absolute = path.isAbsolute(filePath) ? filePath : path.resolve(rootDir, filePath);
+      const affected = moduleGraph.invalidate(absolute);
+      const targets = affected.length > 0 ? affected : [absolute];
+      const packets: Array<Awaited<ReturnType<typeof rebuildOne>>> = [];
+      for (const target of targets) {
+        if (await resolveCandidate(target)) {
+          try {
+            packets.push(await rebuildOne(target));
+          } catch {
+            continue;
+          }
+        }
+      }
 
-      const moduleId = (path.relative(rootDir, absolute) || path.basename(absolute)).replace(/\\/g, '/');
-      const packet = {
-        type: 'update',
-        moduleId,
-        payload: {
-          code: compilation.code,
-          hash: compilation.hash,
-          prevHash: prev?.hash,
-          filePath: absolute
-        },
-        timestamp: Date.now()
-      } as const;
-
-      logger.debug('rebuildModule', moduleId, prev?.hash ? `${prev.hash.slice(0,8)}->${compilation.hash.slice(0,8)}` : compilation.hash.slice(0,8));
-      return [packet];
-    }
+      return packets;
+    },
+    moduleGraph,
+    cacheStats: () => cache.stats(),
+    analyzeGraph: () => ({
+      modules: moduleGraph.entries().length,
+      cycles: moduleGraph.detectCycles(),
+      cache: cache.stats()
+    })
   };
 };

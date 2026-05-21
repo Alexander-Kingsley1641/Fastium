@@ -14,6 +14,7 @@ export interface ModuleNode {
 
 export class ModuleGraph {
   private readonly nodes = new Map<string, ModuleNode>();
+  private readonly aliases = new Map<string, string>();
 
   private normalize(p: string) {
     return path.resolve(p);
@@ -25,6 +26,7 @@ export class ModuleGraph {
     if (node) return node;
     node = { id: path.relative(process.cwd(), key) || path.basename(key), path: key, imports: new Set(), importedBy: new Set() };
     this.nodes.set(key, node);
+    this.aliases.set(node.id.replace(/\\/g, '/'), key);
     return node;
   }
 
@@ -35,10 +37,40 @@ export class ModuleGraph {
     if (!b.importedBy.has(a.path)) b.importedBy.add(a.path);
   }
 
-  invalidate(filePath: string): void {
+  unlinkModule(importer: string, imported: string): void {
+    const importerKey = this.normalize(importer);
+    const importedKey = this.normalize(imported);
+    const importerNode = this.nodes.get(importerKey);
+    const importedNode = this.nodes.get(importedKey);
+    importerNode?.imports.delete(importedKey);
+    importedNode?.importedBy.delete(importerKey);
+  }
+
+  setDependencies(filePath: string, dependencies: string[]): void {
+    const node = this.addModule(filePath);
+    const next = new Set(dependencies.map(dependency => this.normalize(dependency)));
+
+    for (const existing of Array.from(node.imports)) {
+      if (!next.has(existing)) {
+        this.unlinkModule(node.path, existing);
+      }
+    }
+
+    for (const dependency of next) {
+      this.linkModule(node.path, dependency);
+    }
+  }
+
+  updateModule(filePath: string, patch: Partial<Omit<ModuleNode, 'id' | 'path' | 'imports' | 'importedBy'>>): ModuleNode {
+    const node = this.addModule(filePath);
+    Object.assign(node, patch);
+    return node;
+  }
+
+  invalidate(filePath: string): string[] {
     const key = this.normalize(filePath);
     const node = this.nodes.get(key);
-    if (!node) return;
+    if (!node) return [];
     node.lastUpdate = Date.now();
     node.hash = undefined;
     node.cache = undefined;
@@ -60,6 +92,8 @@ export class ModuleGraph {
         stack.push(dependent);
       }
     }
+
+    return Array.from(visited);
   }
 
   getDependents(filePath: string): string[] {
@@ -80,8 +114,61 @@ export class ModuleGraph {
     return this.nodes.has(this.normalize(filePath));
   }
 
+  get(filePath: string): ModuleNode | undefined {
+    return this.nodes.get(this.normalize(filePath));
+  }
+
+  getById(moduleId: string): ModuleNode | undefined {
+    const key = this.aliases.get(moduleId.replace(/\\/g, '/'));
+    return key ? this.nodes.get(key) : undefined;
+  }
+
+  entries(): ModuleNode[] {
+    return Array.from(this.nodes.values());
+  }
+
+  detectCycles(): string[][] {
+    const cycles: string[][] = [];
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const stack: string[] = [];
+
+    const visit = (node: ModuleNode) => {
+      if (visiting.has(node.path)) {
+        const cycleStart = stack.indexOf(node.path);
+        if (cycleStart >= 0) {
+          cycles.push([...stack.slice(cycleStart), node.path]);
+        }
+        return;
+      }
+
+      if (visited.has(node.path)) {
+        return;
+      }
+
+      visiting.add(node.path);
+      stack.push(node.path);
+      for (const dependency of node.imports) {
+        const next = this.nodes.get(dependency);
+        if (next) {
+          visit(next);
+        }
+      }
+      stack.pop();
+      visiting.delete(node.path);
+      visited.add(node.path);
+    };
+
+    for (const node of this.nodes.values()) {
+      visit(node);
+    }
+
+    return cycles;
+  }
+
   clear(): void {
     this.nodes.clear();
+    this.aliases.clear();
   }
 }
 

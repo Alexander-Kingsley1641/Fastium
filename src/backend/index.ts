@@ -282,6 +282,7 @@ export const createBackendRuntime = (options: BackendRuntimeOptions = {}): Backe
 
   const stop = async (): Promise<void> => {
     if (!server) {
+      websocket.close();
       return;
     }
 
@@ -290,6 +291,7 @@ export const createBackendRuntime = (options: BackendRuntimeOptions = {}): Backe
     await new Promise<void>((resolve, reject) => {
       instance.close(error => (error ? reject(error) : resolve()));
     });
+    websocket.close();
   };
 
   return {

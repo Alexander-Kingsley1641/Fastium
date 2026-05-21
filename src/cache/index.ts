@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 
 export interface CacheOptions {
   ttlMs?: number;
@@ -8,12 +8,18 @@ export interface CacheOptions {
 interface CacheEntry<V> {
   value: V;
   expiresAt: number | null;
+  size: number;
+  hits: number;
+  createdAt: number;
+  lastAccess: number;
 }
 
 const isExpired = <V>(entry: CacheEntry<V>): boolean => entry.expiresAt !== null && Date.now() > entry.expiresAt;
 
 export class MemoryCache<K, V> {
   private readonly store = new Map<K, CacheEntry<V>>();
+  private hits = 0;
+  private misses = 0;
 
   constructor(private readonly options: CacheOptions = {}) {}
 
@@ -26,20 +32,27 @@ export class MemoryCache<K, V> {
     }
 
     const expiresAt = typeof ttlMs === 'number' ? Date.now() + ttlMs : null;
-    this.store.set(key, { value, expiresAt });
+    const now = Date.now();
+    this.store.set(key, { value, expiresAt, size: estimateSize(value), hits: 0, createdAt: now, lastAccess: now });
   }
 
   get(key: K): V | undefined {
     const entry = this.store.get(key);
     if (!entry) {
+      this.misses += 1;
       return undefined;
     }
 
     if (isExpired(entry)) {
       this.store.delete(key);
+      this.misses += 1;
       return undefined;
     }
 
+    this.hits += 1;
+    entry.hits += 1;
+    entry.lastAccess = Date.now();
+    this.touch(key);
     return entry.value;
   }
 
@@ -89,7 +102,102 @@ export class MemoryCache<K, V> {
 
     return entries;
   }
+
+  stats(): { entries: number; hits: number; misses: number; estimatedBytes: number } {
+    let estimatedBytes = 0;
+    for (const entry of this.store.values()) {
+      estimatedBytes += entry.size;
+    }
+
+    return {
+      entries: this.store.size,
+      hits: this.hits,
+      misses: this.misses,
+      estimatedBytes
+    };
+  }
+
+  getOrSet(key: K, factory: () => V, ttlMs = this.options.ttlMs): V {
+    const cached = this.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const value = factory();
+    this.set(key, value, ttlMs);
+    return value;
+  }
 }
+
+export interface FileCacheMetadata {
+  filePath: string;
+  size: number;
+  mtimeMs: number;
+  hash?: string;
+}
+
+export interface TransformCacheRecord<V> {
+  value: V;
+  metadata: FileCacheMetadata;
+  dependencies: Record<string, FileCacheMetadata>;
+}
+
+const estimateSize = (value: unknown): number => {
+  if (typeof value === 'string') {
+    return value.length * 2;
+  }
+
+  if (value instanceof Uint8Array) {
+    return value.byteLength;
+  }
+
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+};
+
+export const readFileMetadata = async (filePath: string, hash?: string): Promise<FileCacheMetadata | undefined> => {
+  try {
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) {
+      return undefined;
+    }
+
+    return {
+      filePath,
+      size: fileStat.size,
+      mtimeMs: fileStat.mtimeMs,
+      hash
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+export const isFileMetadataFresh = async (metadata: FileCacheMetadata | undefined): Promise<boolean> => {
+  if (!metadata) {
+    return false;
+  }
+
+  const current = await readFileMetadata(metadata.filePath);
+  return Boolean(current && current.size === metadata.size && current.mtimeMs === metadata.mtimeMs);
+};
+
+export const isTransformCacheRecordFresh = async <V>(record: TransformCacheRecord<V> | undefined): Promise<boolean> => {
+  if (!record || !(await isFileMetadataFresh(record.metadata))) {
+    return false;
+  }
+
+  for (const dependency of Object.values(record.dependencies)) {
+    if (!(await isFileMetadataFresh(dependency))) {
+      return false;
+    }
+  }
+
+  return true;
+};
 
 export class PersistentCache<V> {
   private readonly memory: MemoryCache<string, V>;

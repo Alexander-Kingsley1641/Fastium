@@ -2,6 +2,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 
+import { createNativeWatchBuffer, shouldIgnoreNativePath, type NativeWatchEvent } from '../native/watcher/index.js';
 import { createTaskQueue } from '../utils/index.js';
 
 export interface FileChange {
@@ -11,6 +12,8 @@ export interface FileChange {
 
 export interface WatcherOptions {
   debounceMs?: number;
+  ignored?: Array<string | RegExp>;
+  lowLatency?: boolean;
 }
 
 const collectDirectories = async (rootDir: string): Promise<string[]> => {
@@ -21,7 +24,12 @@ const collectDirectories = async (rootDir: string): Promise<string[]> => {
       continue;
     }
 
-    directories.push(...await collectDirectories(path.join(rootDir, entry.name)));
+    const directory = path.join(rootDir, entry.name);
+    if (shouldIgnoreNativePath(directory)) {
+      continue;
+    }
+
+    directories.push(...await collectDirectories(directory));
   }
 
   return directories;
@@ -31,8 +39,33 @@ export const createWatcher = (rootDir: string, onChange: (changes: FileChange[])
   const watchers = new Map<string, FSWatcher>();
   const queue = createTaskQueue();
   const pending = new Map<string, FileChange>();
-  const debounceMs = options.debounceMs ?? 30;
+  const nativeBuffer = createNativeWatchBuffer(2048);
+  const debounceMs = options.debounceMs ?? (options.lowLatency === false ? 30 : 8);
   let timer: NodeJS.Timeout | undefined;
+
+  const shouldIgnore = (filePath: string): boolean => {
+    if (shouldIgnoreNativePath(filePath)) {
+      return true;
+    }
+
+    for (const ignored of options.ignored ?? []) {
+      if (typeof ignored === 'string' && filePath.includes(ignored)) {
+        return true;
+      }
+
+      if (ignored instanceof RegExp && ignored.test(filePath)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const nativeEvent = (event: FileChange['event']): NativeWatchEvent => {
+    if (event === 'add') return 1;
+    if (event === 'change') return 2;
+    return 3;
+  };
 
   const flush = () => {
     if (timer) {
@@ -49,6 +82,11 @@ export const createWatcher = (rootDir: string, onChange: (changes: FileChange[])
   };
 
   const addChange = (change: FileChange) => {
+    if (shouldIgnore(change.path)) {
+      return;
+    }
+
+    nativeBuffer.push(change.path, nativeEvent(change.event));
     pending.set(change.path, change);
     flush();
   };
@@ -103,6 +141,7 @@ export const createWatcher = (rootDir: string, onChange: (changes: FileChange[])
 
     watchers.clear();
     pending.clear();
+    nativeBuffer.clear();
     if (timer) {
       clearTimeout(timer);
     }
@@ -112,6 +151,11 @@ export const createWatcher = (rootDir: string, onChange: (changes: FileChange[])
     start,
     close,
     rootDir,
-    emit: addChange
+    emit: addChange,
+    stats: () => ({
+      watchers: watchers.size,
+      pending: pending.size,
+      native: nativeBuffer.stats()
+    })
   };
 };

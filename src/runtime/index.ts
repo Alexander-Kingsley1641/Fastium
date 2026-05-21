@@ -15,6 +15,7 @@ import { createSandbox } from '../sandbox/index.js';
 import { createPlayground } from '../playground/index.js';
 import { Client as DiscordClient } from '../discord/index.js';
 import { createCache } from '../cache/index.js';
+import { runNativeBenchmarkSuite } from '../native/benchmark/index.js';
 import { createRouter } from '../router/index.js';
 import { createSignal, createStore } from '../state/index.js';
 
@@ -107,9 +108,17 @@ export const createFastium = (config: FastiumConfig = {}): FastiumRuntime => {
         logger.debug('bundler.invalidate failed', err);
       }
       try {
-        const packets = await (bundler as any).rebuildModule(change.path).catch(() => []);
-        for (const pkt of packets) {
-          hmr.update(pkt.moduleId ?? change.path, pkt.payload);
+        const rebuild = typeof (bundler as any).rebuildAffected === 'function' ? (bundler as any).rebuildAffected : (bundler as any).rebuildModule;
+        const packets = await rebuild(change.path).catch(() => []);
+        if (packets.length > 1 && typeof (hmr as any).batch === 'function') {
+          (hmr as any).batch(packets);
+        } else {
+          for (const pkt of packets) {
+            hmr.update(pkt.moduleId ?? change.path, pkt.payload);
+          }
+        }
+        if (typeof (bundler as any).analyzeGraph === 'function') {
+          hmr.graph((bundler as any).analyzeGraph());
         }
       } catch (err) {
         logger.debug('bundler.rebuildModule failed', err);
@@ -172,11 +181,17 @@ export const createFastium = (config: FastiumConfig = {}): FastiumRuntime => {
     }),
     analyze: async (entry = resolvedConfig.entry ?? 'examples/main.fst') => {
       const bundle = await bundler.bundle(entry);
+      const native = await runNativeBenchmarkSuite(bundle.code);
       return {
         entry: bundle.entry,
         modules: bundle.modules.length,
         externals: bundle.externals.length,
-        hash: bundle.modules.at(0)?.compilation.hash
+        hash: bundle.modules.at(0)?.compilation.hash,
+        graph: typeof (bundler as any).analyzeGraph === 'function' ? (bundler as any).analyzeGraph() : undefined,
+        native: {
+          totalMs: native.totalMs,
+          results: native.results.map(item => ({ name: item.name, durationMs: item.durationMs, status: item.status }))
+        }
       };
     },
     dispose: async () => {
@@ -202,6 +217,55 @@ export const createFastium = (config: FastiumConfig = {}): FastiumRuntime => {
         ctx.setHeader('content-type', 'application/javascript');
         return ctx.send('// hmr client unavailable');
       }
+    });
+
+    backend.get('/__fastium/browser', async (ctx) => {
+      ctx.setHeader('content-type', 'text/html; charset=utf-8');
+      return ctx.send(browser.renderInspector({
+        server: {
+          host: resolvedConfig.server?.host ?? '127.0.0.1',
+          port: resolvedConfig.server?.port ?? 3000,
+          hmrPath: resolvedConfig.hmr && typeof resolvedConfig.hmr === 'object' ? resolvedConfig.hmr.path ?? '/fastium-hmr' : '/fastium-hmr'
+        },
+        graph: typeof (bundler as any).analyzeGraph === 'function' ? (bundler as any).analyzeGraph() : undefined,
+        hmr: hmr.history(),
+        memory: process.memoryUsage()
+      }));
+    });
+
+    backend.get('/__fastium/graph', async (ctx) => {
+      ctx.setHeader('content-type', 'application/json; charset=utf-8');
+      return ctx.send(typeof (bundler as any).analyzeGraph === 'function' ? (bundler as any).analyzeGraph() : {});
+    });
+
+    backend.get('/__fastium/playground', async (ctx) => {
+      ctx.setHeader('content-type', 'text/html; charset=utf-8');
+      return ctx.send(playground.renderHtml());
+    });
+
+    backend.get('/__fastium/playground/state', async (ctx) => {
+      ctx.setHeader('content-type', 'application/json; charset=utf-8');
+      return ctx.send(playground.snapshot());
+    });
+
+    backend.get('/__fastium/playground/report', async (ctx) => {
+      const report = await playground.runValidation({
+        rootDir: resolvedConfig.rootDir,
+        compiler,
+        bundler,
+        hmr,
+        sandbox
+      });
+      ctx.setHeader('content-type', 'application/json; charset=utf-8');
+      return ctx.send(report);
+    });
+
+    backend.get('/__fastium/playground/testing-lab', async (ctx) => {
+      const { createTestLab } = await import('../testing-lab/index.js');
+      const lab = createTestLab({ rootDir: resolvedConfig.rootDir, logger: logger.child('playground:lab'), keepOnFailure: false });
+      const report = await lab.runAll();
+      ctx.setHeader('content-type', 'application/json; charset=utf-8');
+      return ctx.send(report);
     });
   } catch (err) {
     logger.debug('hmr client route registration failed', err);

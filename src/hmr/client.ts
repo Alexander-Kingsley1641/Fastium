@@ -107,45 +107,67 @@ export const getHmrClientScript = (): string => {
   };
 
   const hmr = ensureHmr();
-  const socket = new WebSocket(url);
-  socket.binaryType = 'arraybuffer';
+  let reconnectTimer = 0;
 
-  socket.addEventListener('message', (ev) => {
+  const handlePacket = (pkt) => {
+    if (!pkt || typeof pkt !== 'object') return;
+    if (pkt.type === 'batch' && Array.isArray(pkt.payload)) {
+      for (const child of pkt.payload) {
+        handlePacket(child);
+      }
+      return;
+    }
+    if (pkt.type === 'reload') {
+      console.info('Fastium HMR reload');
+      location.reload();
+      return;
+    }
+    if (pkt.type === 'error') {
+      console.error('Fastium HMR runtime error', pkt.payload);
+      const overlay = document.getElementById('fastium-hmr-overlay') || createOverlay();
+      const stackEl = overlay.querySelector('#fastium-hmr-stack');
+      if (stackEl) {
+        stackEl.textContent = String(pkt.payload?.stack ?? pkt.payload?.message ?? pkt.payload);
+      }
+      return;
+    }
+    if (pkt.type === 'update' && pkt.moduleId && pkt.payload && pkt.payload.code) {
+      hmr.applyUpdate(pkt.moduleId, pkt.payload.code);
+      return;
+    }
+    if (pkt.type === 'invalidate') {
+      console.info('Fastium HMR invalidate', pkt.moduleId);
+    }
+  };
+
+  const connect = () => {
+    const socket = new WebSocket(url);
+    socket.binaryType = 'arraybuffer';
+
+    socket.addEventListener('open', () => {
+      reconnectTimer = 0;
+    });
+
+    socket.addEventListener('message', (ev) => {
     try {
       const packets = typeof ev.data === 'string' ? [JSON.parse(ev.data)] : decodePackets(ev.data);
       for (const pkt of packets) {
-        if (!pkt || typeof pkt !== 'object') continue;
-        if (pkt.type === 'reload') {
-          console.info('Fastium HMR reload');
-          location.reload();
-          return;
-        }
-        if (pkt.type === 'error') {
-          console.error('Fastium HMR runtime error', pkt.payload);
-          const overlay = document.getElementById('fastium-hmr-overlay') || createOverlay();
-          const stackEl = overlay.querySelector('#fastium-hmr-stack');
-          if (stackEl) {
-            stackEl.textContent = String(pkt.payload?.stack ?? pkt.payload?.message ?? pkt.payload);
-          }
-          return;
-        }
-        if (pkt.type === 'update' && pkt.moduleId && pkt.payload && pkt.payload.code) {
-          hmr.applyUpdate(pkt.moduleId, pkt.payload.code);
-          continue;
-        }
-        if (pkt.type === 'invalidate') {
-          console.info('Fastium HMR invalidate', pkt.moduleId);
-          continue;
-        }
+        handlePacket(pkt);
       }
     } catch (error) {
       console.error('Fastium HMR client error', error);
     }
-  });
+    });
 
-  socket.addEventListener('close', () => {
-    console.warn('Fastium HMR socket closed');
-  });
+    socket.addEventListener('close', () => {
+      console.warn('Fastium HMR socket closed');
+      const delay = Math.min(1000 + reconnectTimer * 250, 5000);
+      reconnectTimer += 1;
+      setTimeout(connect, delay);
+    });
+  };
+
+  connect();
 })();
 `;
 };
