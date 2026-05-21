@@ -5,6 +5,7 @@ import { createLogger, type Logger } from '../logger/index.js';
 import { parseFastSource, type FastProgram } from '../parser/index.js';
 import { optimizeFastSource } from './optimizer.js';
 import { applyCompilerTransforms, type CompilerTransform, type CompilerTransformContext } from './transforms.js';
+import { createHmrTransform } from './hmr-transform.js';
 
 export interface CompilationResult {
   code: string;
@@ -27,7 +28,8 @@ export const createCompiler = (options: CompilerOptions = {}) => {
 
   const compileSource = async (source: string, context: CompilerTransformContext = {}): Promise<CompilationResult> => {
     const ast = parseFastSource(source);
-    const transformed = await applyCompilerTransforms(source, { filePath: context.filePath, framework: ast.framework }, options.transforms ?? []);
+    const transforms: CompilerTransform[] = [createHmrTransform(), ...(options.transforms ?? [])];
+    const transformed = await applyCompilerTransforms(source, { filePath: context.filePath, framework: ast.framework }, transforms);
     const code = optimizeFastSource(transformed);
     const result: CompilationResult = {
       code,

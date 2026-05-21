@@ -181,7 +181,7 @@ export const createBundler = (options: BundlerOptions = {}) => {
       cache.set(absolute, compilation);
       try { moduleGraph.addModule(absolute); } catch {}
 
-      const moduleId = path.relative(rootDir, absolute) || path.basename(absolute);
+      const moduleId = (path.relative(rootDir, absolute) || path.basename(absolute)).replace(/\\/g, '/');
       const packet = {
         type: 'update',
         moduleId,

@@ -43,6 +43,7 @@ export interface BackendRuntime {
   websocket: ReturnType<typeof createWebSocketEngine>;
   hmrEnabled: boolean;
   hmrPath: string;
+  listRoutes: () => Array<{ method: string; path: string }>;
 }
 
 export interface BackendRequestContext extends RouteContext {
@@ -87,13 +88,29 @@ const writeResponse = (response: ServerResponse, value: unknown, statusCode = 20
   response.end(JSON.stringify(value));
 };
 
-const serveStatic = async (publicDir: string, requestPath: string, response: ServerResponse): Promise<boolean> => {
+const injectHmrClient = (content: string, hmrPath: string): string => {
+  const script = `<script type="module" src="${hmrPath}/client.js"></script>`;
+  if (content.includes('</body>')) {
+    return content.replace(/<\/body>/i, `${script}\n</body>`);
+  }
+
+  return `${content}\n${script}`;
+};
+
+const serveStatic = async (publicDir: string, requestPath: string, response: ServerResponse, enableHmr: boolean, hmrPath: string): Promise<boolean> => {
   const normalizedPath = requestPath === '/' ? '/index.html' : requestPath;
   const filePath = path.join(publicDir, normalizedPath.replace(/^\//u, ''));
   try {
     const fileStat = await stat(filePath);
     if (!fileStat.isFile()) {
       return false;
+    }
+
+    if (enableHmr && filePath.endsWith('.html')) {
+      const content = await readFile(filePath, 'utf8');
+      response.setHeader('content-type', 'text/html; charset=utf-8');
+      response.end(injectHmrClient(content, hmrPath));
+      return true;
     }
 
     const content = await readFile(filePath);
@@ -180,7 +197,7 @@ export const createBackendRuntime = (options: BackendRuntimeOptions = {}): Backe
         }
       }
 
-      if (options.publicDir && await serveStatic(options.publicDir, url.pathname, response)) {
+      if (options.publicDir && await serveStatic(options.publicDir, url.pathname, response, hmrEnabled, hmrPath)) {
         return;
       }
 
@@ -276,7 +293,6 @@ export const createBackendRuntime = (options: BackendRuntimeOptions = {}): Backe
   };
 
   return {
-    websocket,
     use: router.use,
     route: registerRoute,
     get(pathname: string, handler: (context: BackendRequestContext) => unknown | Promise<unknown>) {
@@ -299,8 +315,10 @@ export const createBackendRuntime = (options: BackendRuntimeOptions = {}): Backe
     stop,
     handle: handleRequest,
     server: () => server,
+    websocket,
     hmrEnabled,
-    hmrPath
+    hmrPath,
+    listRoutes: router.listRoutes
   };
 };
 

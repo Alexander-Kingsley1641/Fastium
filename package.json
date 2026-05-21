@@ -38,7 +38,8 @@
     "docs:dev": "node scripts/serve-docs.ts",
     "docs:build": "node scripts/build-docs.ts",
     "cli": "node dist/src/cli/index.js",
-    "doctor": "node dist/src/cli/index.js doctor"
+    "doctor": "node dist/src/cli/index.js doctor",
+    "test:hmr": "npm run build && node scripts/run-hmr-tests.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",
