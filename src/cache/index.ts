@@ -43,12 +43,24 @@ export class MemoryCache<K, V> {
     return entry.value;
   }
 
+  // LRU touch: mark key as recently used
+  touch(key: K): void {
+    const entry = this.store.get(key);
+    if (!entry) return;
+    this.store.delete(key);
+    this.store.set(key, entry);
+  }
+
   has(key: K): boolean {
     return this.get(key) !== undefined;
   }
 
   delete(key: K): boolean {
     return this.store.delete(key);
+  }
+
+  invalidate(key: K): boolean {
+    return this.delete(key);
   }
 
   clear(): void {

@@ -82,11 +82,28 @@ export const decodeWebSocketFrame = (buffer: Buffer): WebSocketFrame | undefined
 
 export const createWebSocketEngine = () => {
   const sockets = new Set<Socket>();
+  const lastSeen = new Map<Socket, number>();
+  const PRUNE_INTERVAL = 30_000; // 30s
+  const STALE_THRESHOLD = 120_000; // 2 minutes
+
+  const pruneTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [socket, t] of lastSeen.entries()) {
+      if (now - t > STALE_THRESHOLD) {
+        try { socket.destroy(); } catch {}
+        lastSeen.delete(socket);
+        sockets.delete(socket);
+      }
+    }
+  }, PRUNE_INTERVAL);
 
   const add = (socket: Socket) => {
     sockets.add(socket);
+    lastSeen.set(socket, Date.now());
+    socket.on('data', () => lastSeen.set(socket, Date.now()));
     socket.once('close', () => {
       sockets.delete(socket);
+      lastSeen.delete(socket);
     });
   };
 
@@ -105,6 +122,7 @@ export const createWebSocketEngine = () => {
       socket.end();
     }
     sockets.clear();
+    clearInterval(pruneTimer);
   };
 
   return {

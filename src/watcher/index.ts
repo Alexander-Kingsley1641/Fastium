@@ -54,6 +54,26 @@ export const createWatcher = (rootDir: string, onChange: (changes: FileChange[])
   };
 
   const start = async () => {
+    // Use recursive watch on supported platforms to reduce resource usage
+    const useRecursive = process.platform === 'win32' || process.platform === 'darwin';
+    if (useRecursive) {
+      const watcher = watch(rootDir, { persistent: true, recursive: true }, (event, fileName) => {
+        const filePath = fileName ? path.join(rootDir, fileName.toString()) : rootDir;
+        if (event === 'change') {
+          addChange({ path: filePath, event: 'change' });
+          return;
+        }
+
+        // 'rename' may indicate add or unlink
+        void stat(filePath)
+          .then(() => addChange({ path: filePath, event: 'add' }))
+          .catch(() => addChange({ path: filePath, event: 'unlink' }));
+      });
+
+      watchers.set(rootDir, watcher);
+      return;
+    }
+
     const directories = await collectDirectories(rootDir);
     for (const directory of directories) {
       if (watchers.has(directory)) {
@@ -62,8 +82,13 @@ export const createWatcher = (rootDir: string, onChange: (changes: FileChange[])
 
       const watcher = watch(directory, { persistent: true }, (event, fileName) => {
         const filePath = fileName ? path.join(directory, fileName.toString()) : directory;
+        if (event === 'change') {
+          addChange({ path: filePath, event: 'change' });
+          return;
+        }
+
         void stat(filePath)
-          .then(() => addChange({ path: filePath, event: event === 'rename' ? 'add' : 'change' }))
+          .then(() => addChange({ path: filePath, event: 'add' }))
           .catch(() => addChange({ path: filePath, event: 'unlink' }));
       });
 

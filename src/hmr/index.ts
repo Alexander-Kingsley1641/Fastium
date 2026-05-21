@@ -36,7 +36,14 @@ export const createHmrRuntime = (options: HmrOptions = {}) => {
       return packet;
     },
     update(moduleId: string, payload: unknown) {
-      const packet: HmrPacket = { type: 'update', moduleId, payload, timestamp: Date.now() };
+      const prev = state.get(moduleId);
+      const packet: HmrPacket = { type: 'update', moduleId, payload: { value: payload, __prevState: prev }, timestamp: Date.now() };
+      void events.emit('packet', packet);
+      return packet;
+    },
+    rollback(moduleId: string, reason = 'rollback') {
+      const prev = state.get(moduleId);
+      const packet: HmrPacket = { type: 'update', moduleId, payload: { __rollback: true, __reason: reason, __prevState: prev }, timestamp: Date.now() };
       void events.emit('packet', packet);
       return packet;
     },

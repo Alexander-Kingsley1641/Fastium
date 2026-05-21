@@ -7,6 +7,7 @@ import { createBundler } from '../bundler/index.js';
 import { createBackendRuntime } from '../backend/index.js';
 import { createBrowserBridge } from '../browser/index.js';
 import { createHmrRuntime } from '../hmr/index.js';
+import { encodeHmrBatch } from '../hmr/packet.js';
 import { createPluginManager, type FastiumPlugin } from '../plugins/index.js';
 import { createWatcher } from '../watcher/index.js';
 import { createTestRuntime } from '../testing/index.js';
@@ -100,7 +101,20 @@ export const createFastium = (config: FastiumConfig = {}): FastiumRuntime => {
   const watcher = createWatcher(resolvedConfig.rootDir ?? process.cwd(), async changes => {
     for (const change of changes) {
       await plugins.hotUpdate({ filePath: change.path, changed: change.event !== 'unlink' });
-      hmr.invalidate(change.path, change);
+      try {
+        bundler.invalidate(change.path);
+      } catch (err) {
+        logger.debug('bundler.invalidate failed', err);
+      }
+      try {
+        const packets = await (bundler as any).rebuildModule(change.path).catch(() => []);
+        for (const pkt of packets) {
+          hmr.update(pkt.moduleId ?? change.path, pkt.payload);
+        }
+      } catch (err) {
+        logger.debug('bundler.rebuildModule failed', err);
+        hmr.invalidate(change.path, change);
+      }
     }
   });
   const testing = createTestRuntime({ logger: logger.child('test') });
@@ -173,6 +187,57 @@ export const createFastium = (config: FastiumConfig = {}): FastiumRuntime => {
       cache.clear();
     }
   };
+
+  // Serve minimal HMR client script
+  try {
+    const routePath = `${resolvedConfig.hmr && typeof resolvedConfig.hmr === 'object' ? resolvedConfig.hmr.path ?? '/fastium-hmr' : '/fastium-hmr'}/client.js`;
+    backend.get(routePath, async (ctx) => {
+      try {
+        const clientModule = await import('../hmr/client.js');
+        const clientScript = typeof clientModule.getHmrClientScript === 'function' ? clientModule.getHmrClientScript() : '';
+        ctx.setHeader('content-type', 'application/javascript');
+        return ctx.send(clientScript);
+      } catch (err) {
+        logger.debug('hmr client import failed', err);
+        ctx.setHeader('content-type', 'application/javascript');
+        return ctx.send('// hmr client unavailable');
+      }
+    });
+  } catch (err) {
+    logger.debug('hmr client route registration failed', err);
+  }
+
+  // Wire HMR packets to websocket with microtask batching to minimize allocations
+  (() => {
+    let queue: unknown[] = [];
+    let scheduled = false;
+
+    const flush = () => {
+      scheduled = false;
+      if (queue.length === 0) return;
+      try {
+        const packets = queue.slice() as any[];
+        queue = [];
+        const payload = encodeHmrBatch(packets as any);
+        try {
+          backend.websocket.broadcast(payload);
+          logger.debug('hmr: broadcast', packets.length);
+        } catch (err) {
+          logger.error('hmr broadcast failed', err);
+        }
+      } catch (err) {
+        logger.error('hmr encode failed', err);
+      }
+    };
+
+    hmr.events.on('packet', (packet) => {
+      queue.push(packet as unknown);
+      if (!scheduled) {
+        scheduled = true;
+        queueMicrotask(flush);
+      }
+    });
+  })();
 
   return runtime;
 };

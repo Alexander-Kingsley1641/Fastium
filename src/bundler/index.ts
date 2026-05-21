@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createCache, type MemoryCache } from '../cache/index.js';
 import { createCompiler, type CompilationResult } from '../compiler/index.js';
 import { createLogger, type Logger } from '../logger/index.js';
+import { createGraph } from '../graph/index.js';
 
 export interface BundleModule {
   id: string;
@@ -84,13 +85,13 @@ export const createBundler = (options: BundlerOptions = {}) => {
   const logger = options.logger ?? createLogger({ scope: 'fastium:bundler', debug: false });
   const compiler = options.compiler ?? createCompiler({ logger: logger.child('compiler') });
   const cache = options.cache ?? createCache<string, CompilationResult>({ maxEntries: 256 });
+  const moduleGraph = createGraph();
 
   const graph = async (entryFilePath: string, visited = new Map<string, BundleModule>(), externals = new Set<string>()): Promise<{ visited: Map<string, BundleModule>; externals: Set<string> }> => {
     const absoluteEntry = path.isAbsolute(entryFilePath) ? entryFilePath : path.resolve(rootDir, entryFilePath);
     if (visited.has(absoluteEntry)) {
       return { visited, externals };
     }
-
     const compilation = cache.get(absoluteEntry) ?? await compiler.compileFile(absoluteEntry);
     cache.set(absoluteEntry, compilation);
     const dependencies = extractDependencies(compilation.code);
@@ -100,6 +101,11 @@ export const createBundler = (options: BundlerOptions = {}) => {
       dependencies,
       compilation
     });
+
+    // update module graph
+    try {
+      moduleGraph.addModule(absoluteEntry);
+    } catch {}
 
     for (const dependency of dependencies) {
       if (!isRelativeSpecifier(dependency)) {
@@ -113,6 +119,11 @@ export const createBundler = (options: BundlerOptions = {}) => {
         externals.add(dependency);
         continue;
       }
+
+      // link in module graph
+      try {
+        moduleGraph.linkModule(absoluteEntry, resolved);
+      } catch {}
 
       await graph(resolved, visited, externals);
     }
@@ -146,6 +157,45 @@ export const createBundler = (options: BundlerOptions = {}) => {
 
       const basePath = path.resolve(from, specifier);
       return resolveCandidate(basePath) ?? resolveCandidate(path.join(basePath, 'index'));
+    }
+    ,
+    invalidate: (filePath: string) => {
+      try {
+        moduleGraph.invalidate(filePath);
+      } catch {}
+      try {
+        const abs = path.isAbsolute(filePath) ? filePath : path.resolve(rootDir, filePath);
+        if (typeof (cache as any).invalidate === 'function') {
+          (cache as any).invalidate(abs);
+        } else {
+          cache.delete(abs);
+        }
+      } catch {}
+    }
+    ,
+    rebuildModule: async (filePath: string) => {
+      const absolute = path.isAbsolute(filePath) ? filePath : path.resolve(rootDir, filePath);
+      // compile fresh
+      const compilation = await compiler.compileFile(absolute);
+      const prev = cache.get(absolute) as CompilationResult | undefined;
+      cache.set(absolute, compilation);
+      try { moduleGraph.addModule(absolute); } catch {}
+
+      const moduleId = path.relative(rootDir, absolute) || path.basename(absolute);
+      const packet = {
+        type: 'update',
+        moduleId,
+        payload: {
+          code: compilation.code,
+          hash: compilation.hash,
+          prevHash: prev?.hash,
+          filePath: absolute
+        },
+        timestamp: Date.now()
+      } as const;
+
+      logger.debug('rebuildModule', moduleId, prev?.hash ? `${prev.hash.slice(0,8)}->${compilation.hash.slice(0,8)}` : compilation.hash.slice(0,8));
+      return [packet];
     }
   };
 };
