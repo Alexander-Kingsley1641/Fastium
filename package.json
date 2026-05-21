@@ -1,6 +1,7 @@
 {
   "name": "fastium",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.0",
+  "description": "Fastium is an experimental JavaScript/TypeScript runtime, compiler, bundler, and HMR platform.",
   "type": "module",
   "packageManager": "npm@10.5.0",
   "main": "./dist/src/index.js",
@@ -33,6 +34,7 @@
   "scripts": {
     "dev": "tsc -b tsconfig.json --watch",
     "build": "tsc -b tsconfig.json",
+    "prepare": "npm run build",
     "test": "tsc -b tsconfig.json && node smoke-test/src/index.js && node scripts/check-workspace.ts",
     "lint": "tsc -b tsconfig.json",
     "docs:dev": "node scripts/serve-docs.ts",
@@ -40,6 +42,20 @@
     "cli": "node dist/src/cli/index.js",
     "doctor": "node dist/src/cli/index.js doctor",
     "test:hmr": "npm run build && node scripts/run-hmr-tests.js"
+  },
+  "keywords": [
+    "fastium",
+    "runtime",
+    "compiler",
+    "bundler",
+    "hmr",
+    "watcher",
+    "websocket",
+    "experimental",
+    "pre-alpha"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",

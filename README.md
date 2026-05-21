@@ -1,5 +1,9 @@
 # Fastium
 
+> Experimental pre-alpha package for the Fastium runtime and tooling ecosystem.
+>
+> This project is currently in early development and is intended for experimentation and evaluation only.
+
 Fastium is a single-package JavaScript and TypeScript ecosystem platform built around an internal compiler, bundler, runtime, HMR engine, browser IDE surface, sandbox, testing runtime, and Discord integration.
 
 ## Fastium vs Other NPM Libraries
