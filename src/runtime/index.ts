@@ -152,6 +152,7 @@ export const createFastium = (config: FastiumConfig = {}): FastiumRuntime => {
     events,
     bootstrap: async () => {
       await plugins.setup({ logger, runtime, compiler, server: backend, hmr });
+      await plugins.configureServer(backend);
       return runtime;
     },
     dev: async () => {
@@ -164,7 +165,16 @@ export const createFastium = (config: FastiumConfig = {}): FastiumRuntime => {
     },
     build: async (entry = resolvedConfig.entry ?? 'examples/main.fst') => {
       await runtime.bootstrap();
-      return bundler.bundle(entry);
+      await plugins.buildStart();
+      try {
+        const bundle = await bundler.bundle(entry);
+        await plugins.generateBundle(bundle);
+        await plugins.buildEnd();
+        return bundle;
+      } catch (error) {
+        await plugins.buildEnd(error);
+        throw error;
+      }
     },
     start: async () => {
       await runtime.bootstrap();

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import { createLogger, type Logger } from '../logger/index.js';
-import { parseFastSource, type FastProgram } from '../parser/index.js';
+import { parseModule, type FastProgram, type ParsedModule } from '../parser/index.js';
 import { optimizeFastSource } from './optimizer.js';
 import { applyCompilerTransforms, type CompilerTransform, type CompilerTransformContext } from './transforms.js';
 import { createHmrTransform } from './hmr-transform.js';
@@ -14,6 +14,7 @@ export interface CompilationResult {
   hash: string;
   filePath?: string;
   diagnostics: FastProgram['diagnostics'];
+  parsed: ParsedModule;
 }
 
 export interface CompilerOptions {
@@ -27,7 +28,8 @@ export const createCompiler = (options: CompilerOptions = {}) => {
   const logger = options.logger ?? createLogger({ scope: 'fastium:compiler', debug: false });
 
   const compileSource = async (source: string, context: CompilerTransformContext = {}): Promise<CompilationResult> => {
-    const ast = parseFastSource(source);
+    const parsed = parseModule(source, context.filePath);
+    const ast = parsed.ast as FastProgram;
     const transforms: CompilerTransform[] = [createHmrTransform(), ...(options.transforms ?? [])];
     const transformed = await applyCompilerTransforms(source, { filePath: context.filePath, framework: ast.framework }, transforms);
     const code = optimizeFastSource(transformed);
@@ -37,7 +39,8 @@ export const createCompiler = (options: CompilerOptions = {}) => {
       framework: context.framework ?? ast.framework,
       hash: hashSource(code),
       filePath: context.filePath,
-      diagnostics: ast.diagnostics
+      diagnostics: ast.diagnostics,
+      parsed
     };
 
     logger.debug('compiled', context.filePath ?? '<memory>', result.hash);
